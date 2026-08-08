@@ -52,42 +52,38 @@ inline uint4 philox_4x32(uint64_t seed, uint64_t offset) {
 
 // --- Box-Muller normal transforms ---
 
-// Box-Muller: 4 uint32 -> 4 standard normal floats
-inline float4 box_muller_float(uint4 r) {
-  constexpr float M = 2.3283064365386963e-10f; // 1/2^32
-  constexpr float TWO_PI = 6.2831853071795864f;
-  float u1 = sycl::fma(static_cast<float>(r.x), M, M * 0.5f);
-  float u2 = sycl::fma(static_cast<float>(r.y), M, M * 0.5f);
-  float u3 = sycl::fma(static_cast<float>(r.z), M, M * 0.5f);
-  float u4 = sycl::fma(static_cast<float>(r.w), M, M * 0.5f);
+template <typename scalar_t>
+inline sycl::vec<scalar_t, elems_per_call<scalar_t>> box_muller(uint4 r) {
+  static_assert(
+      std::is_same_v<scalar_t, float> || std::is_same_v<scalar_t, double>);
+  constexpr int size = elems_per_call<scalar_t>;
+  constexpr scalar_t M = static_cast<scalar_t>(2.3283064365386963e-10);
+  constexpr scalar_t TWO_PI = static_cast<scalar_t>(6.2831853071795864);
+  sycl::vec<scalar_t, size> uniform;
+  if constexpr (std::is_same_v<scalar_t, double>) {
+    for (int i = 0; i < size; i++) {
+      uniform[i] = sycl::fma(
+          static_cast<scalar_t>(r.val[2 * i]),
+          M,
+          static_cast<scalar_t>(r.val[2 * i + 1]) * M * M +
+              M * M * static_cast<scalar_t>(0.5));
+    }
+  } else {
+    for (int i = 0; i < size; i++) {
+      uniform[i] = sycl::fma(
+          static_cast<scalar_t>(r.val[i]), M, M * static_cast<scalar_t>(0.5));
+    }
+  }
 
-  float radius1 = sycl::sqrt(-2.0f * sycl::log(u1));
-  float radius2 = sycl::sqrt(-2.0f * sycl::log(u3));
-  float angle1 = TWO_PI * u2;
-  float angle2 = TWO_PI * u4;
-
-  return {
-      radius1 * sycl::cos(angle1),
-      radius1 * sycl::sin(angle1),
-      radius2 * sycl::cos(angle2),
-      radius2 * sycl::sin(angle2)};
-}
-
-// Box-Muller: 4 uint32 -> 2 standard normal doubles
-inline double2 box_muller_double(uint4 r) {
-  constexpr double M = 2.3283064365386963e-10; // 1/2^32
-  constexpr double TWO_PI = 6.2831853071795864;
-  double u1 = sycl::fma(
-      static_cast<double>(r.x),
-      M,
-      static_cast<double>(r.y) * M * M + M * M * 0.5);
-  double u2 = sycl::fma(
-      static_cast<double>(r.z),
-      M,
-      static_cast<double>(r.w) * M * M + M * M * 0.5);
-  double radius = sycl::sqrt(-2.0 * sycl::log(u1));
-  double angle = TWO_PI * u2;
-  return {radius * sycl::cos(angle), radius * sycl::sin(angle)};
+  sycl::vec<scalar_t, size> result;
+  for (int i = 0; i < size; i += 2) {
+    const scalar_t radius =
+        sycl::sqrt(static_cast<scalar_t>(-2.0) * sycl::log(uniform[i]));
+    const scalar_t angle = TWO_PI * uniform[i + 1];
+    result[i] = radius * sycl::cos(angle);
+    result[i + 1] = radius * sycl::sin(angle);
+  }
+  return result;
 }
 
 template <typename scalar_t, bool is_uniform, typename key_offset_calc_t>
@@ -177,18 +173,11 @@ struct PhiloxDistributionFunctor {
   }
 
   void write_normal(uint4 r, int64_t base, int count) const {
-    if constexpr (std::is_same_v<scalar_t, double>) {
-      const auto normals = box_muller_double(r);
-      const double vals[2] = {normals.x, normals.y};
-      for (int j = 0; j < count; j++) {
-        output_[base + j] = static_cast<scalar_t>(vals[j] * param1_ + param0_);
-      }
-    } else {
-      const auto normals = box_muller_float(r);
-      const float vals[4] = {normals.x, normals.y, normals.z, normals.w};
-      for (int j = 0; j < count; j++) {
-        output_[base + j] = static_cast<scalar_t>(vals[j] * param1_ + param0_);
-      }
+    using compute_t =
+        std::conditional_t<std::is_same_v<scalar_t, double>, double, float>;
+    const auto normals = box_muller<compute_t>(r);
+    for (int j = 0; j < count; j++) {
+      output_[base + j] = static_cast<scalar_t>(normals[j] * param1_ + param0_);
     }
   }
 
