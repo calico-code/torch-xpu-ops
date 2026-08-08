@@ -58,6 +58,7 @@ inline sycl::vec<scalar_t, elems_per_call<scalar_t>> box_muller(uint4 r) {
       std::is_same_v<scalar_t, float> || std::is_same_v<scalar_t, double>);
   constexpr int size = elems_per_call<scalar_t>;
   constexpr scalar_t M = static_cast<scalar_t>(2.3283064365386963e-10);
+  constexpr scalar_t M_POW2 = M * M;
   constexpr scalar_t TWO_PI = static_cast<scalar_t>(6.2831853071795864);
   sycl::vec<scalar_t, size> uniform;
   if constexpr (std::is_same_v<scalar_t, double>) {
@@ -65,8 +66,8 @@ inline sycl::vec<scalar_t, elems_per_call<scalar_t>> box_muller(uint4 r) {
       uniform[i] = sycl::fma(
           static_cast<scalar_t>(r.val[2 * i]),
           M,
-          static_cast<scalar_t>(r.val[2 * i + 1]) * M * M +
-              M * M * static_cast<scalar_t>(0.5));
+          static_cast<scalar_t>(r.val[2 * i + 1]) * M_POW2 +
+              M_POW2 * static_cast<scalar_t>(0.5));
     }
   } else {
     for (int i = 0; i < size; i++) {
