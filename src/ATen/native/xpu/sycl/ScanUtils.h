@@ -88,7 +88,7 @@ class LoopScanConfig {
     glb_range_y_ = batch_;
 
     loops_batch = 1;
-    loops_problem = (problem_ + wg_range_x_ - 1) / wg_range_x_;
+    loops_problem = (problem_ + (wg_range_x_ * 2) - 1) / (wg_range_x_ * 2);
   }
 
   static LoopScanConfig<InputInfo, OutputInfo, IndicesInfo, T, BinaryFunction>
